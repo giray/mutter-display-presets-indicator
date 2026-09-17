@@ -61,9 +61,10 @@ def preset_output_lines(preset):
         connector = monitor.get("monitor_info", {}).get("connector", "?")
         for mode in monitor.get("modes", []):
             if mode.get("properties", {}).get("is-current") == "1":
+                refresh = mode.get("refresh_rate")
+                refresh_text = f"{refresh:.0f}" if isinstance(refresh, (int, float)) else "?"
                 current_mode_by_connector[connector] = (
-                    f"{mode.get('width')}x{mode.get('height')}"
-                    f"@{mode.get('refresh_rate'):.0f}"
+                    f"{mode.get('width')}x{mode.get('height')}@{refresh_text}"
                 )
 
     lines = []
@@ -203,6 +204,7 @@ class DisplaySwitcher:
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
         self.current_preset = load_current_preset_name()
+        self._apply_seq = 0
         self.rebuild_menu()
 
     def rebuild_menu(self):
@@ -222,24 +224,24 @@ class DisplaySwitcher:
             empty_item.set_sensitive(False)
             menu.append(empty_item)
         else:
-            # Build all radio items and set initial state before connecting
-            # "toggled" handlers, so constructing the menu doesn't itself
-            # trigger an apply.
-            radio_items = []
-            group = None
+            # Independent check items drawn as radios, deliberately NOT a
+            # RadioMenuItem group: a radio group always forces exactly one
+            # item active (so a fresh install would falsely mark the first
+            # preset), and clicking an already-active radio emits nothing
+            # (so the current preset could never be re-applied).
+            # Set initial state before connecting "activate", so building
+            # the menu doesn't itself trigger an apply.
+            items = []
             for preset in presets:
                 name = preset.get("name", "?")
-                item = Gtk.RadioMenuItem.new_with_label_from_widget(group, name)
-                if group is None:
-                    group = item
-                radio_items.append((item, name))
+                item = Gtk.CheckMenuItem(label=name)
+                item.set_draw_as_radio(True)
+                item.set_active(name == self.current_preset)
+                items.append((item, name))
                 menu.append(item)
 
-            for item, name in radio_items:
-                item.set_active(name == self.current_preset)
-
-            for item, name in radio_items:
-                item.connect("toggled", self.on_preset_toggled, name)
+            for item, name in items:
+                item.connect("activate", self.on_apply, name)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -331,22 +333,25 @@ class DisplaySwitcher:
 
         return submenu
 
-    def on_preset_toggled(self, widget, name):
-        if not widget.get_active():
-            return
-        self.on_apply(widget, name)
-
     def on_apply(self, _widget, name):
+        # Applies can overlap (a Mutter D-Bus call may take seconds); only
+        # the most recently requested one may update the active marker.
+        self._apply_seq += 1
+        seq = self._apply_seq
+
         def on_done(success, stdout, stderr):
+            if seq != self._apply_seq:
+                return
             if success:
                 self.current_preset = name
                 save_current_preset_name(name)
             else:
                 show_error_dialog(f"Failed to apply preset '{name}'", stdout + stderr)
-                # Revert the radio selection to reflect reality.
-                self.rebuild_menu()
+            # Clicking a CheckMenuItem toggles it visually; redraw from the
+            # real state either way.
+            self.rebuild_menu()
 
-        run_cli_async(["apply", name], on_done)
+        run_cli_async(["apply", "--", name], on_done)
 
     def on_save_as(self, _widget):
         name = prompt_for_name("Save current layout as…")
@@ -355,7 +360,7 @@ class DisplaySwitcher:
         self._save(name, force=False)
 
     def _save(self, name, force):
-        args = ["save", name] + (["--force"] if force else [])
+        args = ["save"] + (["--force"] if force else []) + ["--", name]
 
         def on_done(success, stdout, stderr):
             if success:
@@ -397,7 +402,7 @@ class DisplaySwitcher:
             else:
                 show_error_dialog(f"Failed to delete preset '{name}'", stdout + stderr)
 
-        run_cli_async(["delete", name], on_done)
+        run_cli_async(["delete", "--", name], on_done)
 
     def on_rename(self, _widget, old_name):
         new_name = prompt_for_name(f"Rename '{old_name}' to…", old_name)
@@ -406,13 +411,18 @@ class DisplaySwitcher:
         self._rename(old_name, new_name, force=False)
 
     def _rename(self, old_name, new_name, force):
-        args = ["rename", old_name, new_name] + (["--force"] if force else [])
+        args = ["rename"] + (["--force"] if force else []) + ["--", old_name, new_name]
 
         def on_done(success, stdout, stderr):
             if success:
                 if self.current_preset == old_name:
                     self.current_preset = new_name
                     save_current_preset_name(new_name)
+                elif force and self.current_preset == new_name:
+                    # The active preset was just overwritten by a different
+                    # layout; the marker no longer reflects what's on screen.
+                    self.current_preset = None
+                    save_current_preset_name("")
                 self.rebuild_menu()
                 return
             message = stdout + stderr
