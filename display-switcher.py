@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# mutter-display-presets-indicator: tray applet for switching display presets.
+# SPDX-License-Identifier: GPL-3.0-or-later
 import json
 import os
 import shutil

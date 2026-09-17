@@ -43,14 +43,18 @@ ln -sf "$(pwd)/display-switcher.py" ~/.local/bin/display-switcher.py
 chmod +x ~/.local/bin/display-switcher.py
 ```
 
-Autostart entry (`~/.config/autostart/display-switcher.desktop`):
+Autostart entry — `.desktop` files don't expand `~` or `$HOME`, so let the
+shell fill in the absolute path:
 
-```ini
+```bash
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/display-switcher.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=Display Profile Switcher
-Exec=/home/giray/.local/bin/display-switcher.py
+Exec=$HOME/.local/bin/display-switcher.py
 X-GNOME-Autostart-enabled=true
+EOF
 ```
 
 Since this is a standalone tray application (not a GNOME Shell extension),
@@ -77,3 +81,7 @@ disown
 
 Semantic versioning (`MAJOR.MINOR.PATCH`), tracked via git tags and the
 `VERSION` constant at the top of `display-switcher.py`.
+
+## License
+
+[GPL-3.0-or-later](LICENSE).
