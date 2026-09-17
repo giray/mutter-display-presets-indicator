@@ -10,7 +10,7 @@ gi.require_version('Gtk', '3.0')
 gi.require_version('AyatanaAppIndicator3', '0.1')
 from gi.repository import Gtk, GLib, Gio, AyatanaAppIndicator3 as AppIndicator3
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 APP_ID = "display-profile-switcher"
 STATE_DIR = os.path.join(GLib.get_user_state_dir(), "display-switcher")
